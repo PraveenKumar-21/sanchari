@@ -134,7 +134,7 @@ Glossary terms (Trip, Destination, Day, Day Number, Travel Day, Activity, etc.) 
 ### 4.6 Itinerary Export (PDF)
 Not a route; triggered by "Export PDF" on the Itinerary page (F-7).
 - **Generation:** in the browser with `@react-pdf/renderer`, using the Trip data already loaded. The library is loaded with a dynamic `import()` only when the button is clicked. The button shows "Preparing PDF…" while it works.
-- **Page format:** A4 portrait, with the system sans-serif font and black text on white.
+- **Page format:** A4 portrait, black text on white, in the bundled **DejaVu Sans** font (`frontend/src/features/pdf/fonts/`, Bitstream Vera license). It covers Latin with accents, Greek, Cyrillic, arrows and common symbols; Indic and CJK scripts are not covered in V1. Ligatures are turned off, so copied text keeps every letter. The fonts (~1.4 MB) download only when exporting.
 - **Content:**
   1. Title block: Trip name, Trip Type, Trip Dates, trip length
   2. Destinations table: name, dates, number of nights

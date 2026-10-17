@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
+    "@react-pdf/renderer": "^4.9.0",
     "@sanchari/shared": "workspace:*",
     "@tanstack/react-query": "^5.104.1",
     "class-variance-authority": "^0.7.1",

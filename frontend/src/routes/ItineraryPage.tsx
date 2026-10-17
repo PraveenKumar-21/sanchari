@@ -13,6 +13,7 @@ import {
   useReorderActivities,
   useUpdateActivity,
 } from '@/features/itinerary/queries';
+import { ExportPdfButton } from '@/features/pdf/ExportPdfButton';
 import { useTrip } from '@/features/trips/queries';
 import { TripHeader } from '@/features/trips/TripHeader';
 import { useDeleteTripFlow } from '@/features/trips/useDeleteTripFlow';
@@ -71,7 +72,11 @@ function Itinerary({ trip }: { trip: TripDetail }) {
 
   return (
     <div className="space-y-6">
-      <TripHeader trip={trip} onDelete={() => deleteFlow.ask(trip)} />
+      <TripHeader
+        trip={trip}
+        onDelete={() => deleteFlow.ask(trip)}
+        primaryAction={<ExportPdfButton trip={trip} />}
+      />
       <div className="grid gap-4 lg:grid-cols-[11rem_1fr] lg:gap-8">
         <DayNav days={days} />
         <div className="space-y-4">
