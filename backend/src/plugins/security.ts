@@ -5,15 +5,18 @@ import { AppError } from '../lib/app-error';
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * CSRF guard (backend-spec §7, api-contract §2): state-changing requests must come from an
- * allowed Origin. SameSite=Lax cookies and JSON-only bodies cover the rest.
+ * CSRF guard (backend-spec §7, api-contract §2): state-changing requests must be same-origin,
+ * i.e. their Origin equals the host they were sent to, or be from an allowed Origin.
+ * SameSite=Lax cookies and JSON-only bodies cover the rest.
  */
 export function registerOriginCheck(app: FastifyInstance) {
   const allowed = new Set(app.config.allowedOrigins);
   app.addHook('onRequest', async (request) => {
     if (!STATE_CHANGING.has(request.method)) return;
     const origin = request.headers.origin;
-    if (!origin || !allowed.has(origin)) {
+    const self = `${request.protocol}://${request.host}`;
+    if (!origin || (origin !== self && !allowed.has(origin))) {
+      request.log.warn({ origin, self }, 'origin check rejected request');
       throw new AppError(403, 'FORBIDDEN', 'Request origin not allowed');
     }
   });

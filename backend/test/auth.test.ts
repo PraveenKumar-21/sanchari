@@ -212,6 +212,27 @@ describe('request guards', () => {
     expect(res.json().error.code).toBe('FORBIDDEN');
   });
 
+  it('accepts a same-origin request on any host the app is served from', async () => {
+    const res = await t.request({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: {
+        host: 'sanchari-git-main-team.vercel.app',
+        origin: 'http://sanchari-git-main-team.vercel.app',
+      },
+    });
+    expect(res.statusCode).toBe(204);
+  });
+
+  it('rejects an Origin for a different host', async () => {
+    const res = await t.request({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { host: 'sanchari.example', origin: 'https://sanchari.example.evil.test' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('rejects requests without an Origin header', async () => {
     const res = await t.app.inject({
       method: 'POST',
