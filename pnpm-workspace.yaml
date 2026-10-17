@@ -1,0 +1,10 @@
+packages:
+  - shared
+  - backend
+  - frontend
+
+# Supply-chain guard: only install package versions published at least 14 days ago.
+minimumReleaseAge: 20160
+
+onlyBuiltDependencies:
+  - esbuild

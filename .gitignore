@@ -20,3 +20,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Local data / tooling
+.data/
+.vercel/
+*.tsbuildinfo

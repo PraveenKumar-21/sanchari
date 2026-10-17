@@ -1,0 +1,6 @@
+pnpm-lock.yaml
+backend/src/db/migrations/
+frontend/src/components/ui/
+dist/
+.data/
+specs/

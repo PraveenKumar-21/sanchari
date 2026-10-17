@@ -24,9 +24,10 @@ The specs describe the full MVP. To fit one day, a few supporting pieces are **d
 | Spec | Spec says | V1 does | Why | Follow-up |
 |------|-----------|---------|-----|-----------|
 | backend §2, §17.4 | Node.js 24 | Node.js 22 LTS, both locally and on Vercel | Node 22 is what's installed. Still LTS (until April 2027). | Move to 24 in V1.1 |
-| backend §14, §17.1 | Docker Compose Postgres for dev and tests | Local development uses a Neon `dev` branch. Tests use **PGlite** (real Postgres compiled to WebAssembly, running inside the test process). | Docker isn't installed; this means nothing extra to install. | Optional: Docker for local dev |
+| backend §14, §17.1 | Docker Compose Postgres for dev and tests | Local development and tests use **PGlite** (real Postgres compiled to WebAssembly): a file in `.data/` for local development, in memory for tests. A Neon `dev` branch can be used instead by setting `DATABASE_URL` in `.env`. | Docker isn't installed; this means nothing extra to install. | Optional: Docker for local dev |
 | backend §17.1, §17.2 | Preview deployments with Neon preview branches | **Only Production deploys**: Vercel's "Ignored Build Step" skips any branch other than `main`. | Without branching, a Preview would run migrations against the production database. | V1.1: turn on Neon preview branching, then Previews |
 | backend §17.4 | `main` protected; changes only through PRs that pass CI | Push straight to `main`; CI still runs on every push | One person, one day | Protect `main` after launch |
+| backend §2 | (Versions unspecified) | TypeScript 6.0, Vite 8, React Router 8, Zod 4, Fastify 5. pnpm only installs versions at least 14 days old (`minimumReleaseAge`). | TypeScript 7 isn't supported by typescript-eslint yet | Revisit TypeScript 7 later |
 | backend §14 | OpenAPI document generation plus a CI check that it's up to date | Not in V1. The shared Zod schemas still keep the frontend and backend in sync. | Saves time; the risk is low | V1.1 |
 | backend §17.6 | Nightly encrypted `pg_dump` from GitHub Actions | Neon's 6-hour point-in-time restore only | Saves time; data is low-value before launch | V1.1 |
 | frontend §13 | Component tests (RTL + MSW), plus Playwright end-to-end tests for each checklist item | The goal-spec §7 checklist run by hand at the final gate. If time allows, one Playwright smoke test. | Saves time; the backend integration tests cover the rules | V1.1 |
@@ -44,11 +45,11 @@ These need your accounts, so I can't do them. Each one is listed in the phase wh
 
 | # | When | Action |
 |---|------|--------|
-| U1 | Phase 0 start | Run `corepack enable pnpm` (it may need `sudo`). Check with `pnpm --version`. |
+| U1 | Phase 0 start | ✅ Done: pnpm 10.34.7 installed to `~/.local/bin` with `npm --prefix` (this Node install doesn't include corepack). |
 | U2 | Phase 0 | Create a **private** GitHub repo named `sanchari`, with no README, so it's empty. Send me the URL. Make sure `git push` works from this machine (HTTPS token or SSH key). |
 | U3 | Phase 0 | In Vercel (Hobby): **Add New → Project →** import the repo. Name the project `sanchari`. Leave the build settings alone; they come from `vercel.json`. Set Node.js to 22. |
 | U4 | Phase 0 | In the Vercel project: **Storage → Neon** (Free plan), in a region near you, connected to **Production and Development only**. |
-| U5 | Phase 0 | In the Neon console: create a branch named `dev`, and send me its **pooled and direct connection strings** for the local `.env`. Don't paste production credentials. |
+| U5 | Optional | Only if you want local development against Neon instead of PGlite: create a Neon branch named `dev` and put its connection strings in your local `.env`. Don't paste production credentials. |
 | U6 | Phase 0 | In Vercel → Settings → Functions: set the region to match Neon's region. |
 | U7 | Phase 6 | In Vercel → Environment Variables (Production): set `APP_ORIGIN` (the actual production URL) and `CRON_SECRET` (I'll generate one). |
 | U8 | Each gate | Click through the deployed site on desktop **and phone**, and tell me "go" or what's broken. |
@@ -65,14 +66,14 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 0.1 Workspace | Root `package.json` with scripts; `pnpm-workspace.yaml`; a base `tsconfig`; ESLint + Prettier; `.nvmrc` (22); `.env.example`; `CLAUDE.md` with the project rules | backend §15 |
 | 0.2 `shared/` package | TypeScript package skeleton, built with `tsc`, imported by `frontend` and `backend` | backend §3.2 |
 | 0.3 Backend skeleton | Fastify `buildApp()`, the Zod type provider, `config.ts` (environment variables checked with Zod), pino logging with redaction, the error-handler plugin, `GET /api/health` and `/api/health/ready`, and `server.ts` for local development | backend §3.1, §10, §12 |
-| 0.4 Database wiring | Drizzle with `pg` (Neon) and PGlite in tests; `drizzle.config.ts`; `db:generate` and `db:migrate` scripts; the first migration (empty, or `users` only) | backend §5, §17.5 |
+| 0.4 Database wiring | Drizzle with `pg` (Neon) and PGlite in tests; `drizzle.config.ts`; `db:generate` and `db:migrate` scripts; the first migration. **Done early:** the full schema from task 2.1, so that the Phase 0 deploy also proves migrations run on Vercel | backend §5, §17.5 |
 | 0.5 Vercel adapter | `api/index.ts` wraps `buildApp()`. `vercel.json`: build command (migrate, then build), output `frontend/dist`, rewrites (`/api/*` → the function, SPA fallback), and the ignored build step for branches other than `main` | backend §17.2 |
 | 0.6 Frontend skeleton | Vite + React + TypeScript, Tailwind, shadcn/ui setup, React Router, TanStack Query, Sonner; `AppShell`; a placeholder home page that calls `/api/health/ready`; the Vite dev proxy for `/api` | frontend §2, §14 |
 | 0.7 Test setup and CI | Vitest in all three packages; a PGlite test helper; `.github/workflows/ci.yml` (lint, typecheck, test, build) | backend §14 |
 | 0.8 First deploy | Push to GitHub, so Vercel deploys | — |
 
 **Done when:**
-- [ ] `pnpm dev` serves the page locally, and it shows "API: ok, DB: ok" (against the Neon `dev` branch)
+- [ ] `pnpm dev` serves the page locally, and it shows "API: ok, DB: ok" (against local PGlite)
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass
 - [ ] `https://sanchari.vercel.app` shows the same page; `/api/health/ready` returns `200`
 - [ ] CI is green on GitHub
