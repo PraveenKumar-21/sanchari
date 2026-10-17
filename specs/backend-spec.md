@@ -4,7 +4,7 @@
 > Related: [goal-spec.md](./goal-spec.md) · [frontend-spec.md](./frontend-spec.md) · [api-contract-spec.md](./api-contract-spec.md)
 
 ## 1. Overview
-A JSON REST API that stores Users, Sessions, Trips, Destinations, and Activities. It authenticates Users with a session cookie and enforces every business rule in `goal-spec.md` §8; the frontend's checks are a convenience, while the backend is the authority. In production, the same server also serves the built frontend, so the whole app runs on one origin. It's hosted on a single AWS EC2 instance using the AWS Free Tier credits (§17).
+A JSON REST API that stores Users, Sessions, Trips, Destinations, and Activities. It authenticates Users with a session cookie and enforces every business rule in `goal-spec.md` §8; the frontend's checks are a convenience, while the backend is the authority. In production, the API runs as a Vercel Function, and the frontend is served from Vercel's CDN on the same domain, so the whole app is on one origin. The database is Neon Postgres. Both are on free plans (§17).
 
 The backend does **not** generate PDFs. Itinerary Export happens in the browser (frontend-spec §4.6).
 
@@ -15,20 +15,19 @@ Glossary terms are used exactly as defined in `goal-spec.md` §9.
 - **Framework:** Fastify 5
 - **Validation:** Zod, through `fastify-type-provider-zod`. The schemas live in the `shared/` package and are also used by the frontend (§3.2).
 - **API docs:** `@fastify/swagger` generates an OpenAPI document from the Zod schemas, served at `/api/docs` outside production.
-- **Database:** PostgreSQL 17
+- **Database:** PostgreSQL 17: Neon (serverless Postgres) in production and preview, Docker Compose locally
 - **ORM / query layer:** Drizzle ORM (type-safe, SQL-like queries)
 - **Migrations:** `drizzle-kit`. Generated SQL migration files are committed to the repo.
 - **Auth:** our own session-cookie auth: an opaque random token, stored as a hash in Postgres (§7). No auth library or third-party provider.
 - **Password hashing:** Argon2id (`@node-rs/argon2`)
-- **Security plugins:** `@fastify/cookie`, `@fastify/helmet`, `@fastify/rate-limit`
-- **Static frontend (production):** `@fastify/static`
+- **Security plugins:** `@fastify/cookie`, `@fastify/helmet`. Rate limiting is our own small Postgres-backed limiter, because in-memory limits don't work across serverless instances (§11).
 - **Logging:** pino (built into Fastify)
 - **Caching:** none in the MVP
-- **Background jobs / queues:** none. Expired Sessions are cleaned up by a simple timer (§12).
+- **Background jobs / queues:** none. A daily Vercel Cron Job cleans up expired Sessions (§12).
 - **Testing:** Vitest; `fastify.inject()` for HTTP tests against a real Postgres database
 - **Package manager:** pnpm workspaces (monorepo: `frontend/`, `backend/`, `shared/`)
-- **Hosting:** AWS: one EC2 `t4g.micro` (ARM/Graviton) running Docker Compose (Caddy + app + Postgres), with backups to S3 (§17)
-- **Reverse proxy / TLS:** Caddy 2, which gets and renews Let's Encrypt HTTPS certificates automatically
+- **Hosting:** Vercel Hobby (free): the frontend on the CDN and the Fastify API as one Vercel Function (Fluid compute). The database is Neon Free, added through the Vercel Marketplace (§17).
+- **TLS / domain:** provided by Vercel: `https://sanchari.vercel.app`, with the certificate managed automatically
 
 ## 3. Architecture
 
@@ -63,23 +62,21 @@ The frontend imports these instead of maintaining its own copies (frontend-spec 
 
 ### 3.3 Production topology
 ```
-Browser ──HTTPS :443──▶ AWS EC2 t4g.micro (Elastic IP, Amazon Linux 2023)
-                        └── Docker Compose
-                             ├── caddy     :80/:443  HTTPS termination, HTTP → HTTPS redirect
-                             │     │ reverse_proxy
-                             │     ▼
-                             ├── app       :3000 (internal only) Fastify
-                             │     ├── /api/v1/*  → API routes
-                             │     ├── /api/docs  → OpenAPI UI (disabled in production)
-                             │     └── /*         → frontend/dist static files, falling back to index.html for SPA routes
-                             │     │
-                             │     ▼
-                             └── db        :5432 (internal only) PostgreSQL 17, data on the EBS volume
-                                   │
-                                   ▼ nightly pg_dump
-                              S3 bucket (backups, 30-day retention)
+Browser ──HTTPS──▶ Vercel edge (sanchari.vercel.app, TLS, DDoS protection)
+                     ├── /assets/*, /index.html, ... → CDN: frontend/dist static files
+                     ├── /api/*                      → Vercel Function (api/index.ts → Fastify buildApp())
+                     │                                   ├── /api/v1/*          → API routes
+                     │                                   ├── /api/health*       → health checks
+                     │                                   ├── /api/internal/*    → cron-only maintenance
+                     │                                   └── /api/docs          → OpenAPI UI (disabled in production)
+                     │                                         │ pooled connection (TLS)
+                     │                                         ▼
+                     │                                   Neon Postgres 17 (Free plan, same region as the function)
+                     └── any other path              → /index.html (SPA fallback)
+
+GitHub Actions ── nightly pg_dump ──▶ encrypted workflow artifact (30-day retention)
 ```
-Because the app is on one origin, the session cookie can be `SameSite=Lax` and no CORS setup is needed. Only Caddy is reachable from the internet; `app` and `db` are on Docker's internal network.
+Because the app is on one origin, the session cookie can be `SameSite=Lax` and no CORS setup is needed. The function is stateless: Sessions and rate-limit counters live in Postgres, never in memory.
 
 ## 4. Domain Model
 | Entity | Description | Relationships |
@@ -156,6 +153,16 @@ All tables use `uuid` primary keys generated by `gen_random_uuid()` and `timesta
 - **Indexes:** `(trip_id, date, position)`
 - There is no unique constraint on `position`, so shifting and reordering are simple position rewrites inside a transaction (§8). Each operation that touches a date's Activities first locks the Trip row (`FOR UPDATE`), so concurrent requests can't corrupt the order.
 
+### Table: `rate_limits`
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| key | text | PK | Limit name + subject, e.g. `login:203.0.113.7:praveen_k` or `signup:203.0.113.7` |
+| window_start | timestamptz | NOT NULL | Start of the current fixed window |
+| count | integer | NOT NULL | Requests seen in this window |
+
+- **Update:** one atomic `INSERT … ON CONFLICT (key) DO UPDATE` per limited request. It resets `count` to 1 when the window has passed, otherwise adds 1, and returns the new count.
+- **Cleanup:** rows whose window ended more than a day ago are deleted by the daily cron (§12).
+
 - **Cascade rules (summary):** deleting a User deletes their Sessions and Trips; deleting a Trip deletes its Destinations and Activities.
 
 ## 6. Business Rules & Validation
@@ -183,7 +190,7 @@ All tables use `uuid` primary keys generated by `gen_random_uuid()` and `timesta
   2. Store `sha256(token)` as `sessions.id`, with `expires_at = now() + SESSION_TTL_DAYS`.
   3. Send the raw token to the browser in a cookie. Even if the `sessions` table leaked, the stored hashes couldn't be used as cookies.
 - **Cookie:** `sanchari_session`; `HttpOnly`, `Secure` in production, `SameSite=Lax`, `Path=/`, `Max-Age` equal to the TTL.
-- **Per request:** an `authenticate` preHandler hashes the cookie value, looks up a Session that hasn't expired, and sets `request.user = { id, username }`. Otherwise it returns `401 UNAUTHORIZED`. Every route except `POST /auth/signup`, `POST /auth/login`, and `/health` requires it.
+- **Per request:** an `authenticate` preHandler hashes the cookie value, looks up a Session that hasn't expired, and sets `request.user = { id, username }`. Otherwise it returns `401 UNAUTHORIZED`. Every route except `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `/api/health*`, and `/api/internal/*` (which checks `CRON_SECRET` instead) requires it.
 - **Session lifetime:** 14 days, sliding. When less than half the lifetime is left, the expiry is pushed back to a full 14 days and the cookie is re-sent (this happens at most about once a week per Session).
 - **Logout:** deletes the Session row and clears the cookie. Always returns `204`, even if the Session was already gone.
 - **Password hashing:** Argon2id with the library's default parameters (at least 19 MiB memory, 2 iterations). Login verifies against the stored hash. If the username doesn't exist, the server still verifies against a fixed dummy hash, so response timing doesn't reveal which usernames exist.
@@ -202,6 +209,7 @@ All tables use `uuid` primary keys generated by `gen_random_uuid()` and `timesta
 | `trips` | `listTrips`, `getTrip` (the Trip with its Destinations and Activities), `createTrip`, `updateTrip` (replaces the Destination list and applies BR-6, BR-7, BR-12 in one transaction), `deleteTrip` | `db`, `shared` |
 | `activities` | `createActivity` (adds at the end, or at an optional `position`, which lets the frontend's Undo restore a deleted Activity to its spot), `updateActivity`, `deleteActivity`, `reorderActivities(tripId, date, orderedIds)` | `db`, `trips` (ownership check and Trip Dates) |
 | `health` | Liveness and readiness checks | `db` |
+| `internal` | `GET /api/internal/cleanup`: deletes expired Sessions and stale `rate_limits` rows; requires `CRON_SECRET` | `db` |
 | `plugins/auth` | The `authenticate` preHandler and the `request.user` decoration | `auth` |
 | `plugins/errors` | Central error handler (§10) | — |
 | `plugins/security` | helmet, rate limiting, the Origin check | — |
@@ -231,48 +239,45 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 ## 11. Security
 - **Input validation:** every route has Zod schemas for params, query, and body; unknown body fields are rejected. Response schemas strip anything that isn't in the contract, such as `password_hash`.
 - **SQL injection:** all queries go through Drizzle with bound parameters; no SQL is built by joining strings.
-- **XSS:** the API returns only JSON. The frontend renders Activity text as React text and never as raw HTML (no `dangerouslySetInnerHTML`). `@fastify/helmet` sets a strict Content-Security-Policy for the static frontend.
+- **XSS:** the API returns only JSON. The frontend renders Activity text as React text and never as raw HTML (no `dangerouslySetInnerHTML`). `@fastify/helmet` sets security headers on API responses. `vercel.json` sets a strict Content-Security-Policy and the other security headers for the static frontend.
 - **CORS:** disabled, since everything is on one origin. If the frontend is ever hosted separately, allow only `APP_ORIGIN` with `credentials: true`.
-- **Rate limiting:**
+- **Rate limiting:** serverless instances don't share memory, so the counters are stored in Postgres (the `rate_limits` table, §5), using fixed time windows:
   - `POST /auth/login`: 10 per minute per IP and username combination
   - `POST /auth/signup`: 5 per hour per IP
-  - Everything else: 300 per minute per Session
   - Exceeding a limit returns `429 RATE_LIMITED` with a `Retry-After` header.
-- **Secrets management:** only environment variables; `.env` is gitignored, and `.env.example` is committed. The only secret is the Postgres password inside `DATABASE_URL`, because session tokens are random rather than signed. In production it lives in a `.env` file on the instance (`chmod 600`, owned by root) and is never in the image or the repo.
-- **Server hardening (EC2):**
-  - The security group allows inbound traffic on 80 and 443 only. Port 22 is closed; shell access is through AWS SSM Session Manager.
-  - IMDSv2 is required.
-  - Automatic OS security updates are on (`dnf-automatic`).
-  - The instance's IAM role allows only SSM and `s3:PutObject` to the backup bucket.
-- **Body size:** maximum 100 KB per request.
+  - There's no general per-request limit; Vercel's built-in DDoS protection (the Vercel Firewall) covers abusive traffic. Revisit if abuse shows up.
+- **Secrets management:** environment variables only. Locally, `.env` is gitignored and `.env.example` is committed. In production, secrets live in Vercel's encrypted Environment Variables: `DATABASE_URL` and `DATABASE_URL_UNPOOLED` are set by the Neon integration, and `CRON_SECRET` is set by hand. Session tokens are random rather than signed, so no signing secret is needed.
+- **Body size:** maximum 100 KB per request (Vercel's own limit is 4.5 MB).
 - **OWASP Top 10 notes:**
   - Broken access control is covered by BR-8; each test verifies that one User can't access another's Trip.
   - Weak authentication is covered by Argon2id, rate limits, and identical login errors.
-  - Security misconfiguration is covered by helmet, and by turning off `/api/docs` in production.
+  - Security misconfiguration is covered by helmet, the CSP in `vercel.json`, and turning off `/api/docs` in production.
 
 ## 12. Observability
-- **Logging:** pino JSON logs with a request ID on every line. `cookie`, `authorization`, `password`, and `set-cookie` are redacted. Log level: `info` in production, `debug` in development (formatted by `pino-pretty`).
-- **Log storage:** logs stay on the instance, using Docker's `json-file` driver with rotation (`max-size: 10m`, `max-file: 3`). They are not shipped to CloudWatch Logs, which would cost extra. Read them with `docker compose logs` over SSM.
-- **Metrics:** EC2's basic CloudWatch metrics (CPU, network, status checks) are free. One CloudWatch alarm on the system status check triggers EC2 auto-recovery.
+- **Logging:** pino JSON logs written to stdout, with a request ID on every line. `cookie`, `authorization`, `password`, and `set-cookie` are redacted. Log level: `info` in production, `debug` in development (formatted by `pino-pretty`).
+- **Log storage:** Vercel Runtime Logs. On the Hobby plan, they're kept for only **1 hour**, so investigate an issue promptly, using the `X-Request-Id` the User reports. Sending logs elsewhere (log drains) needs a paid plan; that's post-MVP.
+- **Metrics:** the Vercel dashboard (function invocations, errors, duration) and the Neon console (compute and storage usage). Both are free.
 - **Health checks:**
-  - `GET /health` returns `200 { status: "ok" }` (liveness, no database check)
-  - `GET /health/ready` runs `SELECT 1` and returns `200`, or `503` if the database can't be reached
-- **Maintenance:** an hourly timer started at boot runs `DELETE FROM sessions WHERE expires_at < now()`.
+  - `GET /api/health` returns `200 { status: "ok" }` (liveness, no database check)
+  - `GET /api/health/ready` runs `SELECT 1` and returns `200`, or `503` if the database can't be reached
+  - Optional: a free external uptime monitor polling `/api/health/ready` every 5 minutes. Note that this keeps Neon awake and uses its compute hours (§17.3).
+- **Maintenance:**
+  - Expired Sessions are deleted in two ways: lazily (on login, that User's expired Sessions), and by a daily Vercel Cron Job that calls `GET /api/internal/cleanup` (Vercel Cron sends `GET` requests), which also clears old `rate_limits` rows.
+  - The cleanup endpoint isn't part of the public contract. It requires `Authorization: Bearer $CRON_SECRET` (Vercel sends this automatically) and returns `404` otherwise.
 
 ## 13. Performance & Scalability
-- **Expected load:** tiny, under 100 Users and under 1 request per second. A single small instance is plenty.
+- **Expected load:** tiny, under 100 Users and under 1 request per second. Well within the free tiers (§17.3).
 - **Response size:** `GET /trips/:tripId` returns the whole Itinerary in one response. The worst case (60 days × 50 Activities) is about 3,000 Activities, around 1.5 MB. Typical Trips are a few KB.
 - **Query plan:** `getTrip` uses 3 indexed queries (the Trip, its Destinations, its Activities) without joins that would multiply rows. `listTrips` uses 2 queries (the Trips, then all their Destinations, grouped in code).
 - **Caching strategy:** none. Postgres is fast enough at this scale.
 - **Pagination:** none for Trips (capped at 200 per User by BR-11).
 - **Date handling:** the Postgres driver is configured to return `date` columns as strings (Drizzle `date({ mode: 'string' })`). This avoids converting dates to JavaScript `Date` objects in UTC, which can shift them by a day.
-- **Connection pool:** `pg.Pool`, with at most 10 connections.
-- **Memory budget (1 GiB on t4g.micro):**
-  - Postgres: `shared_buffers=128MB`, `max_connections=20`
-  - Node: `--max-old-space-size=256`
-  - Caddy: about 30 MB
-  - A 1 GiB swap file as a safety margin
-  - Images are built in CI, not on the instance, because a Vite build could run it out of memory.
+- **Database connections:** the app connects with Neon's **pooled** connection string (PgBouncer, `DATABASE_URL`), using `pg.Pool` with `max: 5` and a short idle timeout, created once per function instance. Migrations use the **direct** (unpooled) string, `DATABASE_URL_UNPOOLED`.
+- **Cold starts:**
+  - Neon suspends its compute after 5 minutes idle. The first request afterwards waits for it to wake up (typically under a second).
+  - The Vercel Function has its own cold start (around a few hundred ms).
+  - Both mostly affect the first `GET /auth/me` after a quiet period. That's acceptable for the MVP; the frontend shows a spinner (frontend-spec §8).
+- **Function region:** set the Vercel Function region to the one closest to the Neon database region (e.g. both in Mumbai/`bom1` + `aws-ap-south-1`, or both in `iad1` + `aws-us-east-1`). Each request makes several database round trips, so a cross-region gap multiplies the latency.
 
 ## 14. Testing Strategy
 - **Unit (Vitest):** the `shared/` validation rules (BR-1 to BR-9, especially the Destination sequence and the 60-day limit), password hashing helpers, session token helpers.
@@ -281,23 +286,23 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
   - The BR-12 confirm flow, including a rollback when an error happens partway through
   - Reorder with a stale ID list returns `409`
   - Session expiry and sliding renewal
+  - Rate limiting across "instances" (two app instances sharing one database still enforce one limit)
   - Each test file uses a fresh database schema, and every table is truncated between tests.
 - **API / contract tests:** responses are checked against the `shared/` Zod schemas in the integration tests. A CI check fails if the generated OpenAPI document no longer matches the copy committed under `backend/openapi.json`, so changes to the contract are visible in code review.
-- **Seed / fixture data:** `pnpm db:seed` creates the user `demo` (password `demo-pass-123`) with two Trips: a 5-day, two-Destination Trip with a Travel Day and some Activities, and a 1-day Trip with no Activities. Only for local development.
+- **Seed / fixture data:** `pnpm db:seed` creates the user `demo` (password `demo-pass-123`) with two Trips: a 5-day, two-Destination Trip with a Travel Day and some Activities, and a 1-day Trip with no Activities. Only for local development and preview database branches, never production.
 
 ## 15. Folder Structure
 ```
-/ (repo root)
-  package.json              # pnpm workspace scripts: dev, build, test, lint
+/ (repo root)                 # also the Vercel project root
+  package.json              # pnpm workspace scripts: dev, build, test, lint, db:*
   pnpm-workspace.yaml       # frontend, backend, shared
+  vercel.json               # build/output settings, rewrites, headers, cron, function region
+  api/
+    index.ts                # Vercel Function entry: adapts backend buildApp() to Vercel's request handler
   docker-compose.yml        # local Postgres 17 (dev and test databases)
-  deploy/
-    docker-compose.prod.yml # caddy + app + db, with log rotation and healthchecks
-    Caddyfile               # {$DOMAIN} { reverse_proxy app:3000 }
-    backup.sh               # pg_dump → S3
-    sanchari-backup.service # systemd unit + timer (nightly)
-    sanchari-backup.timer
-    README.md               # first-time server setup and restore runbook
+  .github/workflows/
+    ci.yml                  # lint, typecheck, tests, OpenAPI check, build
+    backup.yml              # nightly pg_dump → encrypted artifact (§17.6)
   shared/
     src/
       schemas/              # auth.ts, trip.ts, activity.ts, error.ts (Zod)
@@ -308,25 +313,25 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
   backend/
     drizzle.config.ts
     openapi.json            # generated, committed (contract check)
-    Dockerfile
     src/
-      server.ts             # entry point: buildApp() + listen
-      app.ts                # buildApp(): registers plugins and routes (also used by tests)
+      server.ts             # local development entry: buildApp() + listen
+      app.ts                # buildApp(): registers plugins and routes (used by server.ts, api/index.ts, and tests)
       config.ts             # loads and validates environment variables with Zod
       db/
         schema.ts           # Drizzle table definitions
-        client.ts           # pg Pool + drizzle instance
+        client.ts           # pg Pool + drizzle instance (one per function instance)
         migrations/         # generated SQL (committed)
         seed.ts
       plugins/
         auth.ts
         errors.ts
-        security.ts
+        security.ts         # helmet, Origin check, Postgres-backed rate limiter
       modules/
         auth/               # auth.routes.ts, auth.service.ts
         trips/              # trips.routes.ts, trips.service.ts
         activities/         # activities.routes.ts, activities.service.ts
         health/             # health.routes.ts
+        internal/           # cleanup.routes.ts (cron only)
       lib/
         app-error.ts
         password.ts
@@ -340,96 +345,83 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 | Variable | Description | Required | Example |
 |----------|-------------|----------|---------|
 | `NODE_ENV` | `development`, `test`, or `production` | Yes | `production` |
-| `PORT` | Port the HTTP server listens on | No (default `3000`) | `3000` |
-| `DATABASE_URL` | Postgres connection string | Yes | `postgres://sanchari:secret@localhost:5432/sanchari` |
-| `APP_ORIGIN` | The public origin, used for the Origin check | Yes | `https://sanchari.example.com` |
+| `PORT` | Port for the local development server (not used on Vercel) | No (default `3000`) | `3000` |
+| `DATABASE_URL` | Pooled Postgres connection string, used by the app. On Vercel it's set by the Neon integration (with a separate branch for each Preview). | Yes | `postgres://user:pass@ep-xxx-pooler.ap-south-1.aws.neon.tech/sanchari?sslmode=require` |
+| `DATABASE_URL_UNPOOLED` | Direct (unpooled) connection string, used for migrations. Set by the Neon integration; locally, the same as `DATABASE_URL`. | Yes (migrations) | `postgres://user:pass@ep-xxx.ap-south-1.aws.neon.tech/sanchari?sslmode=require` |
+| `APP_ORIGIN` | The production origin, used for the Origin check | Yes (Production) | `https://sanchari.vercel.app` |
+| `CRON_SECRET` | Shared secret for the cleanup cron endpoint; Vercel sends it automatically | Yes (on Vercel) | (random, 32+ characters) |
 | `SESSION_TTL_DAYS` | Session lifetime in days | No (default `14`) | `14` |
 | `LOG_LEVEL` | pino log level | No (default `info`) | `debug` |
-| `TRUST_PROXY` | Trust the `X-Forwarded-*` headers set by Caddy (needed for the correct client IP in rate limiting, and for secure cookies). `true` in production. | No (default `false`) | `true` |
-| `STATIC_DIR` | Path to the built frontend served in production | No (default `../frontend/dist`) | `/app/frontend/dist` |
+| `TRUST_PROXY` | Trust the `X-Forwarded-For` header from Vercel's edge, which is needed for the correct client IP in rate limiting | No (default `true` when `VERCEL` is set, otherwise `false`) | `true` |
 
-**Production only (`deploy/.env` on the instance, read by Docker Compose and Caddy):**
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DOMAIN` | Public hostname that Caddy gets a certificate for | `sanchari.duckdns.org` |
-| `POSTGRES_PASSWORD` | Password for the `db` container; also part of `DATABASE_URL` | (random, 32+ characters) |
-| `BACKUP_BUCKET` | S3 bucket that receives the nightly dumps | `sanchari-backups-123456789012` |
-| `IMAGE_TAG` | Git SHA of the app image to run | `bd75033` |
+**Provided by Vercel automatically:**
+- `VERCEL`
+- `VERCEL_ENV` (`production`, `preview`, or `development`)
+- `VERCEL_URL` and `VERCEL_BRANCH_URL`. In Preview deployments, the Origin check accepts `https://$VERCEL_URL` and `https://$VERCEL_BRANCH_URL` instead of `APP_ORIGIN`.
 
 ## 17. Deployment
+
 ### 17.1 Environments
-- `development`: local machine. Docker Compose runs Postgres, `pnpm dev` runs Vite and Fastify side by side, and Vite proxies `/api` to Fastify.
-- `production`: a single EC2 instance on AWS (§3.3).
-- No staging environment in the MVP.
+| Environment | Where | Database |
+|-------------|-------|----------|
+| `development` | Local machine. `pnpm dev` runs Vite and Fastify (`backend/src/server.ts`) side by side, and Vite proxies `/api` to Fastify. | Docker Compose Postgres 17 |
+| `preview` | Vercel, one deployment per pull request or non-`main` branch, each with its own URL | A Neon database **branch** created by the integration: a copy of production's data at that moment, isolated from it |
+| `production` | Vercel, deployed from `main` at `https://sanchari.vercel.app` | Neon's main branch |
 
-### 17.2 AWS resources
-| Resource | Configuration | Purpose |
-|----------|---------------|---------|
-| EC2 instance | `t4g.micro` (2 vCPU ARM, 1 GiB), Amazon Linux 2023 arm64, Docker + Compose plugin | Runs Caddy, the app, and Postgres |
-| EBS volume | 20 GiB gp3 root volume, `DeleteOnTermination=false` | OS, Docker images, Postgres data |
-| Elastic IP | 1 address, attached to the instance | A stable address for DNS |
-| Security group | Inbound: TCP 80 and 443 from anywhere. Outbound: all. | Only web traffic can reach the server |
-| IAM instance role | `AmazonSSMManagedInstanceCore` + `s3:PutObject` on the backup bucket | Shell and deploys through SSM; backups |
-| S3 bucket | Private, all public access blocked, SSE-S3 encryption, lifecycle rule deleting objects after 30 days | Nightly database backups |
-| IAM role for GitHub OIDC | Can run `ssm:SendCommand` on this instance only | Deploys from CI without long-lived AWS keys |
-| AWS Budgets | Alerts at $5 and $15 of monthly cost | No surprise bills (also one of the onboarding tasks that earns credits) |
-| CloudWatch alarm | On a failed EC2 system status check, run auto-recover | Recovers automatically from a hardware failure |
+### 17.2 Platform setup
+| Piece | Configuration | Purpose |
+|-------|---------------|---------|
+| Vercel project | Hobby (free) plan; linked to the GitHub repo; the root directory is the repo root | Builds and hosts the frontend and the API |
+| Static frontend | Build command: `pnpm build` (builds `shared` → `frontend`). Output directory: `frontend/dist`. | Served from Vercel's CDN |
+| Vercel Function | `api/index.ts` wraps the Fastify app from `buildApp()`, following Vercel's Fastify guide. Runs on Node.js 24 with Fluid compute. Region pinned near the database (§13). | Handles all `/api/*` requests |
+| Rewrites (`vercel.json`) | `/api/(.*)` → the function. Everything else that isn't a static file → `/index.html` (SPA fallback). | Frontend and API on one origin |
+| Headers (`vercel.json`) | CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` on frontend routes; long cache on hashed `/assets/*` | Security and performance |
+| Cron (`vercel.json`) | `GET /api/internal/cleanup` once a day (the Hobby plan allows daily cron jobs) | Session and rate-limit cleanup (§12) |
+| Neon Postgres | Added through the Vercel Marketplace (Neon integration), Free plan, Postgres 17. Region next to the function region. **Preview branching is turned on.** | The database |
+| Domain | `sanchari.vercel.app`, or the closest available `*.vercel.app` name. Free, with HTTPS set up automatically. | Public URL |
 
-- **Region:** the one closest to most Users (e.g. `ap-south-1` Mumbai). Everything lives in the same region.
-- **Domain:** a hostname is required, because Caddy needs one to get a Let's Encrypt certificate, and cookies need HTTPS to be `Secure`. Use a free DuckDNS subdomain for the MVP, or a purchased domain with an A record pointing at the Elastic IP.
+**Hobby plan terms:** Vercel's Hobby plan is for **personal, non-commercial use**. If Sanchari ever charges money or is used commercially, upgrade to Vercel Pro (paid).
 
-### 17.3 Cost (AWS Free Tier credits)
-New AWS accounts (since 15 July 2025) receive $100 in credits, plus up to $100 more for completing onboarding tasks. EC2 and EBS usage is paid from these credits, not free on its own.
+### 17.3 Cost and free-tier limits
+**Expected cost: $0 per month**, with no 6- or 12-month expiry.
 
-| Item | Approximate monthly cost |
-|------|-------------------------|
-| EC2 `t4g.micro`, running all month | ~$6 |
-| Public IPv4 address (Elastic IP) | ~$3.60 |
-| EBS 20 GiB gp3 | ~$1.60 |
-| S3 backups (well under 1 GB) | < $0.05 |
-| Data transfer out (the first 100 GB/month are always free) | $0 |
-| **Total** | **~$11/month, paid from credits** |
+| Service | Free-tier limit (approximate, check the current numbers) | Our expected use |
+|---------|------------------------------------------------------|------------------|
+| Vercel Hobby | Around 100 GB of data transfer a month, and a monthly cap on function invocations and CPU time; Runtime Logs kept for 1 hour; cron jobs at most once a day | A tiny fraction of the limits |
+| Neon Free | 0.5–1 GB of storage per project; around 100 compute-hours a month; scales to zero after 5 minutes idle; a 6-hour restore window; 10 branches | Well under 50 MB of data; compute only runs while the app is in use |
 
-These figures use approximate us-east-1 prices and vary slightly by region. Before the Free plan ends (reportedly 6 months, or when the credits run out), either upgrade the account to the Paid plan (~$11/month), or move elsewhere. The containerized setup runs unchanged on any host with Docker. **On the Free plan, AWS deletes a closed account's data, including the S3 backups, so download a final backup first.**
+These limits change; check vercel.com/docs/limits and neon.com/pricing before launch. If a limit is ever reached, Neon suspends compute until the next month, or Vercel pauses the project. There are no surprise charges, because neither free plan has a payment method attached.
 
-### 17.4 Containerization
-- **App image:** a multi-stage `Dockerfile` that installs the workspace, builds `shared`, `frontend`, and `backend`, then copies only the production dependencies and build output into a small `node:24-slim` image. It runs as a non-root user and is built for `linux/arm64`, to match Graviton.
-- **`deploy/docker-compose.prod.yml`:**
-  - `caddy:2-alpine`: ports 80 and 443; volumes for certificate storage
-  - `app`: `ghcr.io/<owner>/sanchari:${IMAGE_TAG}`; healthcheck on `/health/ready`; `restart: unless-stopped`
-  - `postgres:17-alpine`: named volume for its data; healthcheck with `pg_isready`; not published to the host
-  - The `app` container starts only after `db` reports healthy.
+### 17.4 CI/CD
+1. **GitHub Actions (`ci.yml`), on every push and PR:** lint, typecheck, unit tests, integration tests (with a Postgres service container), the OpenAPI check, and the build.
+2. **Vercel Git integration:** every push gets a Preview deployment; merging to `main` deploys to Production. Vercel deploys on its own, separately from GitHub Actions. To keep a broken build out of production, **protect `main`**: changes reach `main` only through PRs whose CI checks pass.
+3. **Rollback:** Vercel's "Instant Rollback" switches Production back to the previous deployment. Database migrations aren't rolled back, which is why they only add things (§17.5).
 
-### 17.5 CI/CD (GitHub Actions)
-1. **On every push or PR:** lint, typecheck, unit tests, integration tests (with a Postgres service container), the OpenAPI check, and the build.
-2. **On push to `main`, if everything passes:**
-   - Build the `linux/arm64` image with `docker buildx` and push it to GitHub Container Registry, tagged with the git SHA.
-   - Assume the deploy role through GitHub OIDC (no stored AWS keys).
-   - Use `aws ssm send-command` to run on the instance: `cd /opt/sanchari && IMAGE_TAG=<sha> docker compose pull app && docker compose up -d app`.
-3. **Rollback:** run the same deploy command with the previous SHA.
-4. Expect a few seconds of downtime while the `app` container restarts; acceptable for the MVP.
-
-### 17.6 Database migrations
+### 17.5 Database migrations
 - In development: change `db/schema.ts`, run `pnpm db:generate`, review the SQL it produces, and commit it.
-- On deploy: the `app` container runs `pnpm db:migrate` before starting the server.
-- Migrations only add things (no destructive changes without a two-step plan).
+- On deploy: the Vercel build command runs `pnpm db:migrate` (using `DATABASE_URL_UNPOOLED`) before building. So a Preview migrates its own Neon branch, and Production migrates the main branch when `main` deploys.
+- Migrations only add things (no destructive changes without a two-step plan), so that a rolled-back deployment still works with the newer schema.
 
-### 17.7 Backups & restore
-- **Nightly backup:** a systemd timer at 02:00 local time runs `deploy/backup.sh`:
-  `docker compose exec -T db pg_dump -Fc -U sanchari sanchari | aws s3 cp - s3://$BACKUP_BUCKET/sanchari-$(date +%F).dump`
-- **Retention:** 30 days, through the S3 lifecycle rule.
-- **Restore:** documented in `deploy/README.md`: download a dump, then `pg_restore --clean --if-exists` into the `db` container.
+### 17.6 Backups & restore
+- **Point-in-time restore:** Neon's Free plan keeps a 6-hour history, so the database can be restored to any moment in the last 6 hours from the Neon console. This covers "I just broke something".
+- **Nightly backup (`backup.yml`):**
+  - A scheduled GitHub Actions workflow runs `pg_dump -Fc` against production (using `DATABASE_URL_UNPOOLED`, stored as a repository secret).
+  - It encrypts the dump with `gpg --symmetric`, using a passphrase from another secret, and uploads it as a workflow artifact with 30-day retention.
+  - The repository must be **private**: even encrypted, the dump contains Users' password hashes.
+- **Restore:** documented in `README.md`: download the artifact, decrypt it, then `pg_restore --clean --if-exists` into the target database, or into a new Neon branch to check it first.
 - **Restore drill:** test the restore once before launch.
-- **Recovery point:** up to 24 hours of data can be lost. That's acceptable for the MVP.
+- **Recovery point:** within 6 hours from Neon's history, otherwise up to 24 hours from the nightly dump. That's acceptable for the MVP.
 
-### 17.8 First-time server setup
-Documented step by step in `deploy/README.md`:
-1. Create the AWS resources in §17.2 (by hand in the console for the MVP; infrastructure-as-code is post-MVP).
-2. Through SSM: install Docker and the Compose plugin, create the swap file, and enable `dnf-automatic`.
-3. Copy `deploy/` to `/opt/sanchari` and create `deploy/.env` (§16).
-4. Point the domain at the Elastic IP, run `docker compose up -d`, and confirm Caddy obtained a certificate.
-5. Enable the backup timer and run one backup by hand to verify it.
+### 17.7 First-time setup
+1. Push the repository to a **private** GitHub repo and protect `main` (require the CI checks).
+2. In Vercel, import the repo (Hobby plan), set the build command, output directory, and Node.js 24, and choose the project name `sanchari` to get `sanchari.vercel.app`.
+3. Add Neon from the Vercel Marketplace (Free plan), pick a region, connect it to the project, and turn on Preview branching. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`.
+4. Set `APP_ORIGIN` and `CRON_SECRET` in the Vercel project's Environment Variables, and pin the function region to match Neon's.
+5. Deploy `main`. Confirm that the migrations ran, `/api/health/ready` returns `200`, and signup works.
+6. Add the backup secrets to GitHub, run `backup.yml` by hand once, and test a restore into a new Neon branch.
 
 ## 18. Open Questions
-- **Domain:** a free DuckDNS subdomain, or buy a domain? Needed before the first deploy (§17.2).
-- **After the Free plan:** upgrade the AWS account to Paid (~$11/month), or move the containers elsewhere? Decide before the credits or the Free plan run out (§17.3).
+None open. Resolved:
+- **Hosting:** Vercel Hobby for the app, plus Neon Free Postgres through the Vercel Marketplace (§17). This replaces the earlier AWS EC2 plan.
+- **Domain:** a free `sanchari.vercel.app` subdomain. A custom domain can be added later on Hobby at no extra cost beyond the domain itself.
+- **After the free tier:** both free plans have no time limit. Upgrade only if the free-tier limits are reached or the use becomes commercial (§17.2, §17.3).

@@ -8,11 +8,11 @@ This document is the human-readable contract between the frontend and the backen
 Glossary terms are used as defined in `goal-spec.md` §9. Business rules are referenced by their IDs (BR-1 to BR-13) from `backend-spec.md` §6.
 
 ## 1. Overview
-- **Base URL:** `/api/v1` (same origin as the frontend, e.g. `https://sanchari.duckdns.org/api/v1`)
+- **Base URL:** `/api/v1` (same origin as the frontend, e.g. `https://sanchari.vercel.app/api/v1`)
 - **Protocol / style:** REST over HTTPS, JSON
 - **Content-Type:** Requests that have a body must send `Content-Type: application/json`; anything else gets `415`. Responses are `application/json; charset=utf-8`, except `204 No Content`.
 - **Versioning strategy:** The version is in the URL path. Within `v1`, only *additive* changes are allowed: new endpoints, new optional request fields, and new response fields. Clients must ignore response fields they don't recognize. Any breaking change means `/api/v2`.
-- **Health checks:** `GET /health` and `GET /health/ready` live outside the base URL, at the server root (§7.6).
+- **Health checks:** `GET /api/health` and `GET /api/health/ready` are outside the versioned base URL (§7.4).
 
 ## 2. Authentication
 - **Scheme:** a session cookie (backend-spec §7).
@@ -181,8 +181,8 @@ Days aren't sent. The client derives them from `startDate`, `endDate`, and `dest
 | PATCH | `/trips/{tripId}/activities/{activityId}` | Yes | Edit an Activity's text |
 | DELETE | `/trips/{tripId}/activities/{activityId}` | Yes | Delete an Activity |
 | PUT | `/trips/{tripId}/days/{date}/activity-order` | Yes | Reorder the Activities on one date |
-| GET | `/health` | No | Liveness (outside `/api/v1`) |
-| GET | `/health/ready` | No | Readiness, including the database (outside `/api/v1`) |
+| GET | `/api/health` | No | Liveness (unversioned) |
+| GET | `/api/health/ready` | No | Readiness, including the database (unversioned) |
 
 ## 7. Endpoint Details
 The examples use one Trip throughout: *Japan Spring*, with Kyoto 12–14 Mar 2027 and Osaka 14–16 Mar 2027. That's 5 Days, and 14 Mar is a Travel Day.
@@ -584,12 +584,12 @@ Nothing is changed. The client shows a confirmation (frontend-spec §7.4) and re
 **Notes:** On a `409`, the client refetches the Trip and lets the User try again.
 
 ### 7.4 Health
-These endpoints are at the server root, not under `/api/v1`, and have no `{ data }` envelope.
+These endpoints are under `/api` but not versioned (not under `/api/v1`), and have no `{ data }` envelope.
 
-#### `GET /health`
+#### `GET /api/health`
 - **Response `200`:** `{ "status": "ok" }`. The process is up; the database isn't checked.
 
-#### `GET /health/ready`
+#### `GET /api/health/ready`
 - **Response `200`:** `{ "status": "ok" }`. The database answered.
 - **Response `503`:** `{ "status": "unavailable" }`. The database can't be reached.
 
@@ -600,10 +600,9 @@ These endpoints are at the server root, not under `/api/v1`, and have no `{ data
   |-------|-------|-----|
   | `POST /auth/signup` | 5 per hour | Client IP |
   | `POST /auth/login` | 10 per minute | Client IP + lowercased username |
-  | All other `/api/v1` endpoints | 300 per minute | Session (or client IP when there's no Session) |
-  | `/health*` | Not limited | — |
+  | All other endpoints | Not limited by the app (Vercel's platform DDoS protection applies) | — |
 
-- **Headers returned** (on rate-limited routes):
+- **Headers returned** (on the two rate-limited routes above):
 
   | Header | Meaning |
   |--------|---------|
