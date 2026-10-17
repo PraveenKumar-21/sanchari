@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
