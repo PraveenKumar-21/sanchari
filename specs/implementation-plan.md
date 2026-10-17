@@ -1,6 +1,6 @@
 # Implementation Plan — Sanchari V1 (one-day build)
 
-> Status: Active | Owner: Praveen Kumar | Target: implement and deploy V1 on 2026-10-17
+> Status: **Done: V1.0.0 released 2026-10-17** | Owner: Praveen Kumar | Live: https://sanchari-trips.vercel.app
 > Builds: [goal-spec.md](./goal-spec.md) · [frontend-spec.md](./frontend-spec.md) · [backend-spec.md](./backend-spec.md) · [api-contract-spec.md](./api-contract-spec.md)
 
 ## 1. Goal for Today
@@ -77,10 +77,10 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 0.8 First deploy | Push to GitHub, so Vercel deploys | — |
 
 **Done when:**
-- [ ] `pnpm dev` serves the page locally, and it shows "API: ok, DB: ok" (against local PGlite)
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass
-- [ ] `https://sanchari-trips.vercel.app` shows the same page; `/api/health/ready` returns `200`
-- [ ] CI is green on GitHub
+- [x] `pnpm dev` serves the page locally, and it shows "API: ok, DB: ok" (against local PGlite)
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass
+- [x] `https://sanchari-trips.vercel.app` shows the same page; `/api/health/ready` returns `200`
+- [x] CI is green on GitHub
 
 ### Phase 1 — Shared domain rules (≈ 1 h)
 **Goal:** all the validation and date logic, fully unit-tested, before any feature uses it.
@@ -94,7 +94,7 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 1.5 Unit tests | Every rule, including edge cases: a 1-day trip, Travel Days, a gap, an overlap, exactly 60 vs 61 days, 29 Feb, usernames with mixed case | goal §8 |
 
 **Done when:**
-- [ ] `pnpm --filter shared test` is green, covering every BR-1 to BR-9 rule and the edge cases above
+- [x] `pnpm --filter shared test` is green, covering every BR-1 to BR-9 rule and the edge cases above
 
 ### Phase 2 — Database and auth slice (≈ 1.5 h)
 **Goal:** a User can sign up, log in, stay logged in, and log out, locally and in production.
@@ -109,8 +109,8 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 2.6 Frontend auth | API client (`ApiError`, `credentials: 'include'`, a global 401 handler); `useMe`/`useLogin`/`useSignup`/`useLogout`; `ProtectedRoute`/`PublicOnlyRoute` with a safe `returnTo`; the Login and Sign Up pages; the logout menu in `AppShell` | frontend §4.1, §4.2, §8, §11 |
 
 **Done when:**
-- [ ] Integration tests are green
-- [ ] Locally and in production: sign up → land on `/trips` (a placeholder) → reload and stay logged in → log out → `/trips` redirects to `/login`
+- [x] Integration tests are green
+- [x] Locally and in production: sign up → land on `/trips` (a placeholder) → reload and stay logged in → log out → `/trips` redirects to `/login`
 
 ### Phase 3 — Trips slice (≈ 1.5 h)
 **Goal:** create, list, edit, and delete Trips with multiple Destinations.
@@ -123,8 +123,8 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 3.4 Trip form | `TripForm`, `TripTypeRadio`, `DestinationFields` (add, remove, auto-sort, the default start date), `DateRangePicker`, the live summary line, field-level errors from Zod and the API. Create and Edit pages. | frontend §4.4 |
 
 **Done when:**
-- [ ] Integration tests are green
-- [ ] In production: create a 2-Destination Trip with a Travel Day → it appears in the list → edit its name and dates → delete it
+- [x] Integration tests are green
+- [x] In production: create a 2-Destination Trip with a Travel Day → it appears in the list → edit its name and dates → delete it
 
 ### Phase 4 — Itinerary slice (≈ 2 h)
 **Goal:** day-by-day planning, the heart of the app.
@@ -138,8 +138,8 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 4.5 Undo and DayNav | Undo toast (re-POST at the old `position`); `DayNav` sidebar or strip | frontend §4.5 *(cut list 1, 2)* |
 
 **Done when:**
-- [ ] Integration tests are green
-- [ ] In production: add, edit, reorder, and delete Activities across several Days, including a Travel Day; shrink a Destination and confirm; the Day Numbers update correctly
+- [x] Integration tests are green
+- [x] In production: add, edit, reorder, and delete Activities across several Days, including a Travel Day; shrink a Destination and confirm; the Day Numbers update correctly
 
 ### Phase 5 — PDF export (≈ 45 min)
 | Task | Details | Spec |
@@ -148,7 +148,7 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 5.2 Export button | Lazy `import()` of `@react-pdf/renderer`, a "Preparing PDF…" state, the slugified filename | frontend §4.6, §12 |
 
 **Done when:**
-- [ ] In production: the PDF downloads on desktop and opens on the phone; text can be selected; a long Day flows onto the next page
+- [x] In production: the PDF downloads on desktop and opens on the phone; text can be selected; a long Day flows onto the next page
 
 ### Phase 6 — Launch (≈ 1 h)
 | Task | Details | Spec |
@@ -159,8 +159,8 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 | 6.4 Release | `README.md` (setup, scripts, deploy, how to restore from Neon); tag `v1.0.0`; record the V1.1 follow-ups (§3.1) as the next plan | — |
 
 **Done when:**
-- [ ] Every item in the goal-spec §7 checklist passes in production on desktop and phone
-- [ ] `v1.0.0` is tagged and pushed
+- [x] Every item in the goal-spec §7 checklist passes in production on desktop and phone
+- [x] `v1.0.0` is tagged and pushed
 
 ## 6. Schedule at a Glance
 | Phase | Timebox | Running total |
