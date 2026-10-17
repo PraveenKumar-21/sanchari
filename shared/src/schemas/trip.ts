@@ -5,7 +5,7 @@ import { validateDestinationSequence } from '../destinations';
 import { activitySchema } from './activity';
 import { idSchema, isoDateSchema, timestampSchema, trimmedString } from './common';
 
-export const tripTypeSchema = z.enum(TRIP_TYPES);
+export const tripTypeSchema = z.enum(TRIP_TYPES, { message: 'Choose a trip type' });
 
 export const destinationInputSchema = z.strictObject({
   name: trimmedString(MAX_NAME_LENGTH, 'Destination name'),

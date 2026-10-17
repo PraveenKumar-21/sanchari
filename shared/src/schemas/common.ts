@@ -5,7 +5,8 @@ import { isValidDate } from '../dates';
 /** 'YYYY-MM-DD', a real calendar date (api-contract §3). */
 export const isoDateSchema = z
   .string()
-  .refine(isValidDate, { message: 'Must be a valid date (YYYY-MM-DD)' });
+  .min(1, { message: 'Date is required' })
+  .refine((v) => v === '' || isValidDate(v), { message: 'Must be a valid date (YYYY-MM-DD)' });
 
 /** ISO 8601 UTC timestamp in responses (createdAt / updatedAt). */
 export const timestampSchema = z.string();

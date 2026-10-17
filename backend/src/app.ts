@@ -7,6 +7,7 @@ import type { Config } from './config';
 import type { Db } from './db/client';
 import { authRoutes } from './modules/auth/auth.routes';
 import { healthRoutes } from './modules/health/health.routes';
+import { tripRoutes } from './modules/trips/trips.routes';
 import { registerAuth } from './plugins/auth';
 import { registerErrorHandling } from './plugins/errors';
 import { registerOriginCheck } from './plugins/security';
@@ -72,6 +73,7 @@ export async function buildApp({ config, db, logger }: BuildAppOptions) {
 
   await app.register(healthRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
+  await app.register(tripRoutes, { prefix: '/api/v1/trips' });
 
   return app;
 }
