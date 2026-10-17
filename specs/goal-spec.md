@@ -62,6 +62,7 @@ The MVP is done when a new user, on both a desktop browser and a mobile browser,
 - Team size: 1 person
 - Target platform: web only, built responsively for mobile browsers
 - Tech stack: to be chosen in `frontend-spec.md` and `backend-spec.md`
+- Hosting: AWS, kept within the Free Tier credits (details in `backend-spec.md` §17)
 
 **Assumptions** (validate while writing the other specs)
 - A trip has 1–10 destinations and lasts at most 60 days in total.
