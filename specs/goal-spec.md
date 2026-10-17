@@ -24,7 +24,7 @@ Any traveler planning a trip, regardless of who they're traveling with — solo,
 - **F-1 Responsive web app:** usable on desktop and mobile browsers (no native mobile app).
 - **F-2 Accounts:** sign up with username + password; log in and log out. Each user sees only their own trips.
 - **F-3 Create trip:** a trip has a name, a trip type (Solo, Couple, Family, Group of Friends), and one or more destinations.
-- **F-4 Manage destinations:** add, edit, remove, and order a trip's destinations; each destination has a name, start date, and end date. The trip's overall date range is derived from its destinations.
+- **F-4 Manage destinations:** add, edit, and remove a trip's destinations; each destination has a name, start date, and end date. Destinations are ordered automatically by start date. The trip's overall date range is derived from its destinations.
 - **F-5 Day-by-day planning:** open a trip's itinerary and see Day 1 through Day N, each labeled with its date and destination; add, edit, delete, and reorder free-text activities on any day.
 - **F-6 Trip list:** view all of the user's trips with name, destinations, and dates; open, edit, or delete a trip.
 - **F-7 PDF export:** export a trip's itinerary as a PDF at any time.
