@@ -15,7 +15,7 @@ Glossary terms (Trip, Destination, Day, Day Number, Travel Day, Activity, etc.) 
 - **State management:** TanStack Query for server state; React state for local UI. No global store library.
 - **Data fetching:** a thin `fetch` wrapper (`lib/api`) used by TanStack Query hooks
 - **Routing:** React Router (declarative mode)
-- **Forms & validation:** React Hook Form + Zod (Zod schemas mirror the API contract's validation rules)
+- **Forms & validation:** React Hook Form + Zod. The schemas, API types, and date helpers are imported from the `shared/` workspace package (backend-spec §3.2), the same code the backend uses.
 - **Dates:** `date-fns`. Dates are handled as `YYYY-MM-DD` strings, with no time zones (see §6.4)
 - **PDF:** `@react-pdf/renderer`, generated in the browser and lazy-loaded (see §4.6)
 - **Toasts:** `sonner` (shadcn's toast component)
@@ -101,7 +101,7 @@ Glossary terms (Trip, Destination, Day, Day Number, Travel Day, Activity, etc.) 
   - Each Destination starts on the previous one's end date (a Travel Day) or the day after. Overlaps and gaps show an error on the affected row: "Must start on 14 Mar or 15 Mar"
   - Total Trip length is at most 60 days
 - **Helpful defaults:** A newly added Destination's start date defaults to the previous Destination's end date.
-- **Editing dates that remove Days (Edit only):** Before saving, compare the new Trip Dates with the current Itinerary. If any removed date has Activities, show a `ConfirmDialog` listing them ("Day 7 · 18 Mar — 2 activities will be deleted") and save only after the User confirms. See §7.4 and Open Questions.
+- **Editing dates that remove Days (Edit only):** Before saving, compare the new Trip Dates with the current Itinerary. If any removed date has Activities, show a `ConfirmDialog` listing them ("Day 7 · 18 Mar — 2 activities will be deleted") and save only after the User confirms. See §7.4. The server enforces the same check (api-contract §7.2, `PUT /trips/{tripId}`).
 - **Loading / empty / error states:** Edit shows a skeleton while loading the Trip. API validation errors are mapped onto their fields; anything else is shown as a toast.
 - **Acceptance criteria:**
   - [ ] Create, when it succeeds, goes to the new Trip's Itinerary
@@ -194,7 +194,7 @@ React Hook Form for the Trip and auth forms; component state for in-place Activi
 - Dates travel and are stored as `YYYY-MM-DD` strings; there are no times or time zones (goal-spec §8).
 - Convert to `Date` only for display and calculations, using `date-fns` `parseISO` (local midnight). Never use `new Date('YYYY-MM-DD')`, which parses as UTC and can shift the day.
 - "Today" (used to split Upcoming and Past) is the browser's local date.
-- Shared helpers in `lib/dates.ts`: `listTripDates(destinations)`, `dayNumber(tripStart, date)`, `destinationsForDate(destinations, date)` (two on a Travel Day), and `validateDestinationSequence(destinations)`. These are the most heavily unit-tested code in the frontend.
+- Shared helpers in `shared/src/dates.ts`: `listTripDates(destinations)`, `dayNumber(tripStart, date)`, `destinationsForDate(destinations, date)` (two on a Travel Day), and `validateDestinationSequence(destinations)`. These are the most heavily unit-tested code in the frontend.
 
 ### 6.5 Persistence
 Nothing is stored in `localStorage` or `sessionStorage`; all data is on the server.
@@ -228,7 +228,7 @@ Nothing is stored in `localStorage` or `sessionStorage`; all data is on the serv
 
 ## 8. Authentication (Client Side)
 - **Login / signup flow:** On success, the API sets the Session. The frontend then refetches `['me']` and navigates.
-- **Token storage:** The frontend stores no tokens itself. Recommended: the backend issues an HTTP-only, `Secure`, `SameSite=Lax` session cookie, and every request is sent with `credentials: 'include'`. (Final mechanism to be confirmed in `backend-spec.md` / `api-contract-spec.md`.)
+- **Token storage:** The frontend stores no tokens itself. The backend sets an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie (`sanchari_session`, api-contract §2), and every request is sent with `credentials: 'include'`.
 - **Determining the Session:** On app load, call `GET /auth/me`. While it's pending, show a full-page spinner. 200 means logged in; 401 means logged out.
 - **Protected route handling:** `ProtectedRoute` redirects a logged-out User to `/login?returnTo=<current path>`. After login they're sent to `returnTo`, but only if it's an internal path starting with `/`, to prevent open redirects.
 - **Session expiry behavior:** Any API call that returns 401 clears the cache, shows a toast ("Your session has expired, please log in again"), and redirects to `/login?returnTo=…`.
@@ -253,10 +253,15 @@ Nothing is stored in `localStorage` or `sessionStorage`; all data is on the serv
 - **Handling by error code:**
   | Code | Frontend behavior |
   |------|-------------------|
-  | `VALIDATION_ERROR` | Map `details` onto form fields; otherwise show a toast |
+  | `VALIDATION_ERROR` | Map `details[].path` onto form fields; otherwise show a toast |
   | `UNAUTHORIZED` | Session expiry flow (§8) |
+  | `INVALID_CREDENTIALS` | Login form message "Incorrect username or password" |
+  | `USERNAME_TAKEN` | "Username is already taken" on the username field |
+  | `ACTIVITIES_WOULD_BE_DELETED` | Show the §7.4 confirmation using `details`, then resend with `confirmDeleteActivities: true` |
+  | `LIMIT_REACHED` | Toast, e.g. "A day can have at most 50 activities" |
+  | `CONFLICT` | Refetch the Trip and show the toast "This trip changed elsewhere, please try again" |
+  | `RATE_LIMITED` | Toast "Too many attempts, try again in N seconds" (from `Retry-After`) |
   | `FORBIDDEN` / `NOT_FOUND` | Not Found page for page loads; a toast for actions |
-  | `CONFLICT` | Show the message (e.g. "Username is already taken") on the relevant field |
   | Network error / `INTERNAL_ERROR` | Toast "Something went wrong" with Retry where possible |
 - **Form validation messages:** Shown inline under the field after the field loses focus or on submit.
 - **Toasts / notifications:** Success toasts only for actions without an obvious visual result (e.g. "Trip deleted"). Error toasts for failures, and an Undo toast for Activity delete.
@@ -269,7 +274,7 @@ Nothing is stored in `localStorage` or `sessionStorage`; all data is on the serv
 - **Rendering:** A 60-day Itinerary renders all Day cards without list virtualization. This is acceptable at this size; revisit if it's slow.
 
 ## 13. Testing Strategy
-- **Unit (Vitest):** `lib/dates.ts` (Day Numbers, Travel Days, sequence validation, the 60-day limit), Zod schemas, and the API error parser.
+- **Unit (Vitest):** `shared/src/dates.ts` (Day Numbers, Travel Days, sequence validation, the 60-day limit), Zod schemas, and the API error parser.
 - **Component (Vitest + RTL + MSW):** `TripForm` validation and submit, `ActivityItem` edit/delete/reorder including rollback on failure, `ProtectedRoute` redirects.
 - **End-to-end (Playwright, against the real backend):** one test per goal-spec §7 success checklist item, run in Desktop Chrome and a mobile viewport (Pixel 7). Includes checking that a PDF downloads.
 
@@ -293,10 +298,8 @@ frontend/
       layout/               # AppShell, EmptyState, ErrorState, ConfirmDialog
     lib/
       api/                  # fetch client, ApiError, endpoint functions
-      dates.ts
       utils.ts              # shadcn cn() helper
-    types/
-      api.ts                # request/response types from api-contract-spec
+    # API types, Zod schemas, and date helpers are imported from the shared/ package
   tests/
     e2e/                    # Playwright
 ```
@@ -307,7 +310,9 @@ frontend/
 | `VITE_API_BASE_URL` | Base URL of the API. In development, leave it as `/api/v1` and let Vite's proxy forward to the backend, so cookies stay on the same origin. | `/api/v1` |
 
 ## 16. Open Questions
-- **Session mechanism:** cookie session (recommended above) or bearer token? To be settled in the backend spec and API contract.
-- **PDF generation in the browser vs. on the server:** This spec generates in the browser, so the backend needs no PDF dependency (e.g. headless Chrome). If the API contract adds a server-side export endpoint, §4.6 changes accordingly.
-- **Confirming deletion of Activities when dates shrink:** the frontend computes the affected Days from loaded data. Should `PUT /trips/:tripId` also require an explicit flag (e.g. `confirmDeleteActivities: true`) and reject with `409` otherwise, so the server is safe even if the client is stale? Recommended: yes.
-- **Shared types:** hand-written `types/api.ts`, or generated from an OpenAPI document produced by the backend? Depends on the backend stack.
+None open. Resolved:
+- **Session mechanism:** cookie session (api-contract §2).
+- **PDF generation:** in the browser; there's no server endpoint (backend-spec §1).
+- **Confirming deletion of Activities when dates shrink:** the server requires `confirmDeleteActivities: true` and otherwise returns `409 ACTIVITIES_WOULD_BE_DELETED` (api-contract §7.2).
+- **Shared types:** imported from the `shared/` package (backend-spec §3.2).
+- **Undo for Activity delete:** re-create the Activity with `POST …/activities` at its old `position` (api-contract §7.3).
