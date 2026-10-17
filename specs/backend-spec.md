@@ -27,7 +27,7 @@ Glossary terms are used exactly as defined in `goal-spec.md` §9.
 - **Testing:** Vitest; `fastify.inject()` for HTTP tests against a real Postgres database
 - **Package manager:** pnpm workspaces (monorepo: `frontend/`, `backend/`, `shared/`)
 - **Hosting:** Vercel Hobby (free): the frontend on the CDN and the Fastify API as one Vercel Function (Fluid compute). The database is Neon Free, added through the Vercel Marketplace (§17).
-- **TLS / domain:** provided by Vercel: `https://sanchari.vercel.app`, with the certificate managed automatically
+- **TLS / domain:** provided by Vercel: `https://sanchari-trips.vercel.app`, with the certificate managed automatically
 
 ## 3. Architecture
 
@@ -62,7 +62,7 @@ The frontend imports these instead of maintaining its own copies (frontend-spec 
 
 ### 3.3 Production topology
 ```
-Browser ──HTTPS──▶ Vercel edge (sanchari.vercel.app, TLS, DDoS protection)
+Browser ──HTTPS──▶ Vercel edge (sanchari-trips.vercel.app, TLS, DDoS protection)
                      ├── /assets/*, /index.html, ... → CDN: frontend/dist static files
                      ├── /api/*                      → Vercel Function (api/index.ts → Fastify buildApp())
                      │                                   ├── /api/v1/*          → API routes
@@ -277,7 +277,7 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
   - Neon suspends its compute after 5 minutes idle. The first request afterwards waits for it to wake up (typically under a second).
   - The Vercel Function has its own cold start (around a few hundred ms).
   - Both mostly affect the first `GET /auth/me` after a quiet period. That's acceptable for the MVP; the frontend shows a spinner (frontend-spec §8).
-- **Function region:** set the Vercel Function region to the one closest to the Neon database region (e.g. both in Mumbai/`bom1` + `aws-ap-south-1`, or both in `iad1` + `aws-us-east-1`). Each request makes several database round trips, so a cross-region gap multiplies the latency.
+- **Function region:** set the Vercel Function region to the one closest to the Neon database region (e.g. Singapore: `sin1` + `aws-ap-southeast-1`, or N. Virginia: `iad1` + `aws-us-east-1`). Each request makes several database round trips, so a cross-region gap multiplies the latency.
 
 ## 14. Testing Strategy
 - **Unit (Vitest):** the `shared/` validation rules (BR-1 to BR-9, especially the Destination sequence and the 60-day limit), password hashing helpers, session token helpers.
@@ -346,9 +346,9 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 |----------|-------------|----------|---------|
 | `NODE_ENV` | `development`, `test`, or `production` | Yes | `production` |
 | `PORT` | Port for the local development server (not used on Vercel) | No (default `3000`) | `3000` |
-| `DATABASE_URL` | Pooled Postgres connection string, used by the app. On Vercel it's set by the Neon integration (with a separate branch for each Preview). | Yes | `postgres://user:pass@ep-xxx-pooler.ap-south-1.aws.neon.tech/sanchari?sslmode=require` |
-| `DATABASE_URL_UNPOOLED` | Direct (unpooled) connection string, used for migrations. Set by the Neon integration; locally, the same as `DATABASE_URL`. | Yes (migrations) | `postgres://user:pass@ep-xxx.ap-south-1.aws.neon.tech/sanchari?sslmode=require` |
-| `APP_ORIGIN` | The production origin, used for the Origin check | Yes (Production) | `https://sanchari.vercel.app` |
+| `DATABASE_URL` | Pooled Postgres connection string, used by the app. On Vercel it's set by the Neon integration (with a separate branch for each Preview). | Yes | `postgres://user:pass@ep-xxx-pooler.ap-southeast-1.aws.neon.tech/sanchari?sslmode=require` |
+| `DATABASE_URL_UNPOOLED` | Direct (unpooled) connection string, used for migrations. Set by the Neon integration; locally, the same as `DATABASE_URL`. | Yes (migrations) | `postgres://user:pass@ep-xxx.ap-southeast-1.aws.neon.tech/sanchari?sslmode=require` |
+| `APP_ORIGIN` | The production origin, used for the Origin check | Yes (Production) | `https://sanchari-trips.vercel.app` |
 | `CRON_SECRET` | Shared secret for the cleanup cron endpoint; Vercel sends it automatically | Yes (on Vercel) | (random, 32+ characters) |
 | `SESSION_TTL_DAYS` | Session lifetime in days | No (default `14`) | `14` |
 | `LOG_LEVEL` | pino log level | No (default `info`) | `debug` |
@@ -366,7 +366,7 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 |-------------|-------|----------|
 | `development` | Local machine. `pnpm dev` runs Vite and Fastify (`backend/src/server.ts`) side by side, and Vite proxies `/api` to Fastify. | Docker Compose Postgres 17 |
 | `preview` | Vercel, one deployment per pull request or non-`main` branch, each with its own URL | A Neon database **branch** created by the integration: a copy of production's data at that moment, isolated from it |
-| `production` | Vercel, deployed from `main` at `https://sanchari.vercel.app` | Neon's main branch |
+| `production` | Vercel, deployed from `main` at `https://sanchari-trips.vercel.app` | Neon's main branch |
 
 ### 17.2 Platform setup
 | Piece | Configuration | Purpose |
@@ -378,7 +378,7 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 | Headers (`vercel.json`) | CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` on frontend routes; long cache on hashed `/assets/*` | Security and performance |
 | Cron (`vercel.json`) | `GET /api/internal/cleanup` once a day (the Hobby plan allows daily cron jobs) | Session and rate-limit cleanup (§12) |
 | Neon Postgres | Added through the Vercel Marketplace (Neon integration), Free plan, Postgres 17. Region next to the function region. **Preview branching is turned on.** | The database |
-| Domain | `sanchari.vercel.app`, or the closest available `*.vercel.app` name. Free, with HTTPS set up automatically. | Public URL |
+| Domain | `sanchari-trips.vercel.app` (`sanchari.vercel.app` was taken). Free, with HTTPS set up automatically. | Public URL |
 
 **Hobby plan terms:** Vercel's Hobby plan is for **personal, non-commercial use**. If Sanchari ever charges money or is used commercially, upgrade to Vercel Pro (paid).
 
@@ -414,7 +414,7 @@ These limits change; check vercel.com/docs/limits and neon.com/pricing before la
 
 ### 17.7 First-time setup
 1. Push the repository to a **private** GitHub repo and protect `main` (require the CI checks).
-2. In Vercel, import the repo (Hobby plan), set the build command, output directory, and Node.js 24, and choose the project name `sanchari` to get `sanchari.vercel.app`.
+2. In Vercel, import the repo (Hobby plan), set the build command, output directory, and Node.js 24, and choose the project name `sanchari` to get `sanchari-trips.vercel.app`.
 3. Add Neon from the Vercel Marketplace (Free plan), pick a region, connect it to the project, and turn on Preview branching. This sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`.
 4. Set `APP_ORIGIN` and `CRON_SECRET` in the Vercel project's Environment Variables, and pin the function region to match Neon's.
 5. Deploy `main`. Confirm that the migrations ran, `/api/health/ready` returns `200`, and signup works.
@@ -423,5 +423,5 @@ These limits change; check vercel.com/docs/limits and neon.com/pricing before la
 ## 18. Open Questions
 None open. Resolved:
 - **Hosting:** Vercel Hobby for the app, plus Neon Free Postgres through the Vercel Marketplace (§17). This replaces the earlier AWS EC2 plan.
-- **Domain:** a free `sanchari.vercel.app` subdomain. A custom domain can be added later on Hobby at no extra cost beyond the domain itself.
+- **Domain:** a free `sanchari-trips.vercel.app` subdomain. A custom domain can be added later on Hobby at no extra cost beyond the domain itself.
 - **After the free tier:** both free plans have no time limit. Upgrade only if the free-tier limits are reached or the use becomes commercial (§17.2, §17.3).

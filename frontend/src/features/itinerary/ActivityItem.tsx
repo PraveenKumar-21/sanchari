@@ -1,6 +1,6 @@
 import { type Activity, activityTextSchema, MAX_ACTIVITY_LENGTH } from '@sanchari/shared';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
-import { type KeyboardEvent, useState } from 'react';
+import { type KeyboardEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isTempId } from './queries';
@@ -28,6 +28,8 @@ export function ActivityItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(activity.text);
   const [error, setError] = useState<string | null>(null);
+  // Enter/Esc end editing; the input's unmount can still fire blur, which must not save again.
+  const finished = useRef(false);
   const saving = isTempId(activity.id); // not yet confirmed by the server
   const errorId = `activity-${activity.id}-error`;
 
@@ -35,15 +37,18 @@ export function ActivityItem({
     if (saving) return;
     setDraft(activity.text);
     setError(null);
+    finished.current = false;
     setEditing(true);
   };
 
   const commit = () => {
+    if (finished.current) return;
     const parsed = activityTextSchema.safeParse(draft);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Invalid activity');
       return;
     }
+    finished.current = true;
     setEditing(false);
     if (parsed.data !== activity.text) onSave(parsed.data);
   };
@@ -53,6 +58,7 @@ export function ActivityItem({
       e.preventDefault();
       commit();
     } else if (e.key === 'Escape') {
+      finished.current = true;
       setEditing(false);
     }
   };

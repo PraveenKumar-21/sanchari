@@ -8,7 +8,7 @@ This document is the human-readable contract between the frontend and the backen
 Glossary terms are used as defined in `goal-spec.md` §9. Business rules are referenced by their IDs (BR-1 to BR-13) from `backend-spec.md` §6.
 
 ## 1. Overview
-- **Base URL:** `/api/v1` (same origin as the frontend, e.g. `https://sanchari.vercel.app/api/v1`)
+- **Base URL:** `/api/v1` (same origin as the frontend, e.g. `https://sanchari-trips.vercel.app/api/v1`)
 - **Protocol / style:** REST over HTTPS, JSON
 - **Content-Type:** Requests that have a body must send `Content-Type: application/json`; anything else gets `415`. Responses are `application/json; charset=utf-8`, except `204 No Content`.
 - **Versioning strategy:** The version is in the URL path. Within `v1`, only *additive* changes are allowed: new endpoints, new optional request fields, and new response fields. Clients must ignore response fields they don't recognize. Any breaking change means `/api/v2`.

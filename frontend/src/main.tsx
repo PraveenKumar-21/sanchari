@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
 import { Toaster } from '@/components/ui/sonner';
 import { meQueryKey } from '@/features/auth/queries';
 import { ApiError } from '@/lib/api/client';
@@ -32,9 +33,11 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-      <Toaster />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        <Toaster />
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 );

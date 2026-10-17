@@ -6,6 +6,7 @@ import { migrateDb } from '../src/db/migrate';
 import { SESSION_COOKIE } from '../src/lib/session-token';
 
 export const TEST_ORIGIN = 'http://localhost:5173';
+export const TEST_CRON_SECRET = 'test-cron-secret-0123456789abcdefghijklmnop';
 
 let ipCounter = 0;
 /** A distinct client IP, so rate limits in one test don't leak into another. */
@@ -17,6 +18,7 @@ export async function buildTestApp() {
     NODE_ENV: 'test',
     DATABASE_URL: 'pglite://memory',
     APP_ORIGIN: TEST_ORIGIN,
+    CRON_SECRET: TEST_CRON_SECRET,
   });
   const handle = await createDb(config.DATABASE_URL);
   await migrateDb(handle);

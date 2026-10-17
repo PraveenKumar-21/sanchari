@@ -4,7 +4,7 @@
 > Builds: [goal-spec.md](./goal-spec.md) · [frontend-spec.md](./frontend-spec.md) · [backend-spec.md](./backend-spec.md) · [api-contract-spec.md](./api-contract-spec.md)
 
 ## 1. Goal for Today
-By the end of the day, `https://sanchari.vercel.app` runs V1: every MVP feature (F-1 to F-7), deployed on Vercel Hobby + Neon Free. The goal-spec §7 success checklist passes by hand on a desktop browser and a phone.
+By the end of the day, `https://sanchari-trips.vercel.app` runs V1: every MVP feature (F-1 to F-7), deployed on Vercel Hobby + Neon Free. The goal-spec §7 success checklist passes by hand on a desktop browser and a phone.
 
 The specs describe the full MVP. To fit one day, a few supporting pieces are **deferred to V1.1** (§3). They're tracked here, so the specs don't need to change.
 
@@ -63,7 +63,7 @@ These need your accounts, so I can't do them. Each one is listed in the phase wh
 Timeboxes are for my work. Your actions (U-items) happen alongside it where possible.
 
 ### Phase 0 — Bare-bones deploy (≈ 1.5 h)
-**Goal:** a "hello" version of the full stack running locally **and** at `sanchari.vercel.app`, to surface hosting problems first.
+**Goal:** a "hello" version of the full stack running locally **and** at `sanchari-trips.vercel.app`, to surface hosting problems first.
 
 | Task | Details | Spec |
 |------|---------|------|
@@ -79,7 +79,7 @@ Timeboxes are for my work. Your actions (U-items) happen alongside it where poss
 **Done when:**
 - [ ] `pnpm dev` serves the page locally, and it shows "API: ok, DB: ok" (against local PGlite)
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass
-- [ ] `https://sanchari.vercel.app` shows the same page; `/api/health/ready` returns `200`
+- [ ] `https://sanchari-trips.vercel.app` shows the same page; `/api/health/ready` returns `200`
 - [ ] CI is green on GitHub
 
 ### Phase 1 — Shared domain rules (≈ 1 h)
