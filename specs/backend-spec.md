@@ -357,7 +357,7 @@ None in the MVP. PDF generation happens in the browser, and there are no maps, e
 **Provided by Vercel automatically:**
 - `VERCEL`
 - `VERCEL_ENV` (`production`, `preview`, or `development`)
-- `VERCEL_URL` and `VERCEL_BRANCH_URL`. In Preview deployments, the Origin check accepts `https://$VERCEL_URL` and `https://$VERCEL_BRANCH_URL` instead of `APP_ORIGIN`.
+- `VERCEL_URL` and `VERCEL_BRANCH_URL`. On Vercel, the Origin check accepts `https://$VERCEL_URL`, `https://$VERCEL_BRANCH_URL` and `https://$VERCEL_PROJECT_PRODUCTION_URL` in addition to `APP_ORIGIN`: they are all this deployment's own URLs.
 
 ## 17. Deployment
 

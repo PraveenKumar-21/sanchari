@@ -36,12 +36,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const allowedOrigins = new Set<string>();
   if (e.APP_ORIGIN) allowedOrigins.add(e.APP_ORIGIN);
-  if (e.VERCEL_ENV === 'production' && e.VERCEL_PROJECT_PRODUCTION_URL) {
-    allowedOrigins.add(`https://${e.VERCEL_PROJECT_PRODUCTION_URL}`);
-  }
-  if (e.VERCEL_ENV === 'preview') {
-    if (e.VERCEL_URL) allowedOrigins.add(`https://${e.VERCEL_URL}`);
-    if (e.VERCEL_BRANCH_URL) allowedOrigins.add(`https://${e.VERCEL_BRANCH_URL}`);
+  // On Vercel, also accept this deployment's own URLs (deployment, branch, and production domain).
+  for (const host of [e.VERCEL_URL, e.VERCEL_BRANCH_URL, e.VERCEL_PROJECT_PRODUCTION_URL]) {
+    if (host) allowedOrigins.add(`https://${host}`);
   }
 
   return {
