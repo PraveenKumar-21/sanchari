@@ -5,6 +5,7 @@ import Fastify, { type FastifyServerOptions } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { Config } from './config';
 import type { Db } from './db/client';
+import { activityRoutes } from './modules/activities/activities.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import { healthRoutes } from './modules/health/health.routes';
 import { tripRoutes } from './modules/trips/trips.routes';
@@ -74,6 +75,7 @@ export async function buildApp({ config, db, logger }: BuildAppOptions) {
   await app.register(healthRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api/v1/auth' });
   await app.register(tripRoutes, { prefix: '/api/v1/trips' });
+  await app.register(activityRoutes, { prefix: '/api/v1/trips' });
 
   return app;
 }
